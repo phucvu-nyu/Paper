@@ -1,4 +1,4 @@
-# This is an ongoing research project that I am working with Dr.Betensky at NYU
+# This is an ongoing research project that I am working with Dr. Rebecca Betensky at NYU
 ## The situation: 
 - Clinical trials are expensive, there are many outcomes studied.
 - Besides the important ones or "primary outcomes", there are secondary and exploratory outcomes that can be used to generate new hypotheses
