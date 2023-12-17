@@ -6,3 +6,6 @@
 ## What we argue:
 - The purpose of secondary outcomes is just to generate new hypotheses 
 - A post-hoc approach for multiplicity adjustment method may be beneficial and increase the power significantly
+## What's here?
+- The code in R for my simulation to calculate the FWER and FDR of the post hoc approach
+- The code in Python for data visualization
