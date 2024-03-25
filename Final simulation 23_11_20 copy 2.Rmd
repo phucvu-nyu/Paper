@@ -1,0 +1,329 @@
+---
+title: "Simulation_2023_10_26"
+author: "Phuc Quang Vu pqv9968"
+date: "2023-10-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Loading necessary library**
+
+```{r loading library, eval=TRUE,message=FALSE}
+library(mvtnorm)
+library(multtest)
+library(mnonr)
+
+```
+
+**Define function to calculate fwer and fdr given two matrices of hypotheses and testing result**
+
+```{r calculate fwer and fdr, eval=TRUE}
+error_cal<-function(null,test){
+  #dim(null)=dim(test)=number of repetitions*number of test
+  #calculate the total time that null is true and test report a significant result in each replicate
+  V<-apply(null==0&test==1,1,sum)
+  #calculate by row the total significant test result in each replicate
+  R<-apply(test,1,sum)
+  #calculate fwer and fdr
+  #fwer=P(V>0)
+  fwer<-sum(V>0)/length(V)
+  #fdr = E(V/R|R>0)*P(R>0)
+  fdr<-mean(V[R>0]/R[R>0])*sum(R>0)/length(R)
+  return(list('fwer'=fwer,'fdr'=fdr,'v'=V,'r'=R))
+}
+```
+
+
+
+**Define function to generate a random negative orthant dependent positive-definite covariance matrix**
+```{r generate random positive-definite covariance, eval=TRUE}
+matrix_expander<-function(original){
+  d<-dim(original)[1]
+  temp<-rep(0,d)
+  for (i in 1:d){
+    t1<-abs(sum(original[,i])-1)
+    t2<-abs(sum(temp))
+    t<-max(t1,t2)
+    temp[i]<-runif(1,t-1,0)
+  }
+  new<-cbind(rbind(original,temp),c(temp,1))
+  return(new)
+}
+neg_matrix_gen<-function(begin=-0.1,m=20){
+  if (is.matrix(begin)){
+    original <-begin
+  }
+  else {
+    original<-matrix(c(1,begin,begin,1),nrow=2)
+  }
+  
+ d<-dim(original)[1]
+ for (i in 1:(m-d)){
+   original<-matrix_expander(original)
+ }
+return(original)
+}
+```
+
+
+
+
+**Define function to return adjusted p values based on mt.rawp2adjp**
+```{r}
+new_mt.rawp2adjp<-function (rawp, proc = c("Bonferroni", "Holm", "Hochberg", "SidakSS", 
+                         "SidakSD", "BH", "BY", "ABH", "TSBH"), alpha = 0.05, na.rm = FALSE) 
+{
+  m <- length(rawp)
+  if (na.rm) {
+    mgood <- sum(!is.na(rawp))
+  }
+  else {
+    mgood <- m
+  }
+  n <- length(proc)
+  a <- length(alpha)
+  index <- order(rawp)
+  h0.ABH <- NULL
+  h0.TSBH <- NULL
+  spval <- rawp[index]
+  adjp <- matrix(0, m, n + 1)
+  dimnames(adjp) <- list(NULL, c("rawp", proc))
+  adjp[, 1] <- spval
+  if (is.element("TSBH", proc)) {
+    TS.spot <- which(proc == "TSBH")
+    TSBHs <- paste("TSBH", alpha, sep = "_")
+    newprocs <- append(proc, TSBHs, after = TS.spot)
+    newprocs <- newprocs[newprocs != "TSBH"]
+    adjp <- matrix(0, m, n + a)
+    dimnames(adjp) <- list(NULL, c("rawp", newprocs))
+    adjp[, 1] <- spval
+    tmp <- spval
+    for (i in (m - 1):1) {
+      tmp[i] <- min(tmp[i + 1], min((mgood/i) * spval[i], 
+                                    1, na.rm = TRUE), na.rm = TRUE)
+      if (is.na(spval[i])) 
+        tmp[i] <- NA
+    }
+    h0.TSBH <- rep(0, length(alpha))
+    names(h0.TSBH) <- paste("h0.TSBH", alpha, sep = "_")
+    for (i in 1:length(alpha)) {
+      h0.TSBH[i] <- mgood - sum(tmp < alpha[i]/(1 + alpha[i]), 
+                                na.rm = TRUE)
+      adjp[, TS.spot + i] <- tmp*(1+alpha[i]) * h0.TSBH[i]/mgood
+    }
+  }
+  if (is.element("Bonferroni", proc)) {
+    tmp <- mgood * spval
+    tmp[tmp > 1] <- 1
+    adjp[, "Bonferroni"] <- tmp
+  }
+  if (is.element("Holm", proc)) {
+    tmp <- spval
+    tmp[1] <- min(mgood * spval[1], 1)
+    for (i in 2:m) tmp[i] <- max(tmp[i - 1], min((mgood - 
+                                                    i + 1) * spval[i], 1))
+    adjp[, "Holm"] <- tmp
+  }
+  if (is.element("Hochberg", proc)) {
+    tmp <- spval
+    for (i in (m - 1):1) {
+      tmp[i] <- min(tmp[i + 1], min((mgood - i + 1) * spval[i], 
+                                    1, na.rm = TRUE), na.rm = TRUE)
+      if (is.na(spval[i])) 
+        tmp[i] <- NA
+    }
+    adjp[, "Hochberg"] <- tmp
+  }
+  if (is.element("SidakSS", proc)) 
+    adjp[, "SidakSS"] <- 1 - (1 - spval)^mgood
+  if (is.element("SidakSD", proc)) {
+    tmp <- spval
+    tmp[1] <- 1 - (1 - spval[1])^mgood
+    for (i in 2:m) tmp[i] <- max(tmp[i - 1], 1 - (1 - spval[i])^(mgood - 
+                                                                   i + 1))
+    adjp[, "SidakSD"] <- tmp
+  }
+  if (is.element("BH", proc)) {
+    tmp <- spval
+    for (i in (m - 1):1) {
+      tmp[i] <- min(tmp[i + 1], min((mgood/i) * spval[i], 
+                                    1, na.rm = TRUE), na.rm = TRUE)
+      if (is.na(spval[i])) 
+        tmp[i] <- NA
+    }
+    adjp[, "BH"] <- tmp
+  }
+  if (is.element("BY", proc)) {
+    tmp <- spval
+    a <- sum(1/(1:mgood))
+    tmp[m] <- min(a * spval[m], 1)
+    for (i in (m - 1):1) {
+      tmp[i] <- min(tmp[i + 1], min((mgood * a/i) * spval[i], 
+                                    1, na.rm = TRUE), na.rm = TRUE)
+      if (is.na(spval[i])) 
+        tmp[i] <- NA
+    }
+    adjp[, "BY"] <- tmp
+  }
+  if (is.element("ABH", proc)) {
+    tmp <- spval
+    h0.m <- rep(0, mgood)
+    for (k in 1:mgood) {
+      h0.m[k] <- (mgood + 1 - k)/(1 - spval[k])
+    }
+    grab <- min(which(diff(h0.m, na.rm = TRUE) > 0), na.rm = TRUE)
+    h0.ABH <- ceiling(min(h0.m[grab], mgood))
+    for (i in (m - 1):1) {
+      tmp[i] <- min(tmp[i + 1], min((mgood/i) * spval[i], 
+                                    1, na.rm = TRUE), na.rm = TRUE)
+      if (is.na(spval[i])) 
+        tmp[i] <- NA
+    }
+    adjp[, "ABH"] <- tmp * h0.ABH/mgood
+  }
+  list(adjp = adjp, index = index, h0.ABH = h0.ABH[1], h0.TSBH = h0.TSBH[1:length(alpha)])
+}
+```
+
+**Define function to run simulation with 7 arguments: number of replicate, number of test,correlation and random seed**
+```{r, eval=TRUE,message=FALSE}
+neg_simutation<-function(replicate=10000,
+                         number_of_test=20,
+                         begin=-0.1,
+                         null_prob=1
+                         ){
+   # set random seed
+  # create an empty result matrix and empty array for each case using fwer or fdr
+  r_fwer=matrix(0,nrow=replicate, ncol=number_of_test)  
+  nsig_fwer=rep(0,replicate)
+  r_fdr=matrix(0,nrow=replicate, ncol=number_of_test) 
+  nsig_fdr=rep(0,replicate)
+  r_all<- matrix(0,nrow=replicate, ncol=number_of_test)
+  nsig_all<-rep(0,replicate)
+  #create list of null hypotheses
+  null_list<-c(rep(0,ceiling(number_of_test*null_prob)),rep(1,number_of_test-ceiling(number_of_test*null_prob)))
+  null_list<-sort(null_list,decreasing = TRUE)
+  #create an empty matrix consist of result of null hypotheses
+  r_null=matrix(0,nrow=replicate, ncol=number_of_test)
+  #generate an array of mean for generate test statistics
+  mean_list<-null_list
+  # at p(Z>0.841621) of a test statistics ~N(0,1) =0.8, to ensure the new test have a power of 80%
+  #the mean to generate test statistics would be 1.96+0.841621
+  mean_list[mean_list==1]<-1.96+0.841621
+  #create covariance matrix
+  cor_ma<-neg_matrix_gen(begin=begin,m=number_of_test)
+  
+  pb <- txtProgressBar(min = 0, max = replicate, style = 3)
+  for (m in 1:replicate){
+    # generate test statistics from a multivariate normal distribution 
+    #with mean according to mean_list
+    
+    test_stats<-rmvnorm(n=1,
+                        mean=mean_list,
+                        sigma = cor_ma)
+    
+    
+    # calculate p values from the test statistics
+    p_vals<-2*(1-pnorm(abs(test_stats)))
+    #adding null list to matrix of null list by order of p_vals
+    r_null[m,]<-null_list[order(p_vals)]
+    # calculate adjusted p values 
+    m_1<-new_mt.rawp2adjp(p_vals, proc=c("Bonferroni", "Holm", "Hochberg", "SidakSS", "SidakSD")
+                      ,alpha = 0.05, na.rm = FALSE)$adjp
+    m_2<-p.adjust(p_vals[order(p_vals)],method='hommel')
+    m_3<-new_mt.rawp2adjp(p_vals, proc=c("BH", "BY","TSBH"), alpha = 0.05, na.rm = FALSE)$adjp  
+    # making a matrix from the adjusted p values 
+    r_test_fwer=cbind(m_1[,2:6],m_2)
+    r_test_fdr=m_3[,2:4]
+    r_test_all=cbind(r_test_fwer,r_test_fdr)
+    # making a vector of the number of rejected hypotheses using procedures
+    n_test_fwer=apply(r_test_fwer<0.05,2,sum)
+    n_test_fdr=apply(r_test_fdr<0.05,2,sum)
+    n_test_all=apply(r_test_all<0.05,2,sum)
+    #picking the procedure with the most rejected hypotheses
+    n_max_fwer=max(n_test_fwer)
+    n_max_fdr=max(n_test_fdr)
+    n_max_all=max(n_test_all)
+    r_fwer[m,]<-r_test_fwer[,which.max(n_test_fwer)]
+    r_fdr[m,]<-r_test_fdr[,which.max(n_test_fdr)]
+    r_all[m,]<-r_test_all[,which.max(n_test_all)]
+    setTxtProgressBar(pb, m)
+  }
+  # calculate fwer and fdr using r_null and r_fwer, r_fdr 
+  result_1<-error_cal(r_null,r_fwer<0.05)
+  fwer_fwermethod<-result_1$fwer
+  fdr_fwermethod<-result_1$fdr
+  result_2<-error_cal(r_null,r_fdr<0.05)
+  fwer_fdrmethod<-result_2$fwer
+  fdr_fdrmethod<-result_2$fdr
+  result_3<-error_cal(r_null,r_all<0.05)
+  fwer_all<-result_3$fwer
+  fdr_all<-result_3$fdr
+  #return result
+  
+  return(list('fwer_fwermethod'=fwer_fwermethod,'fdr_fwermethod'=fdr_fwermethod,
+              'fwer_fdrmethod'=fwer_fdrmethod,'fdr_fdrmethod'=fdr_fdrmethod,
+              'fwer_all'=fwer_all,'fdr_all'=fdr_all))
+}
+
+```
+
+
+**Results for random matrix**
+
+```{r, eval=TRUE}
+#random matrix = True
+print_result_random_no_sep<-function(num_tests=c(5,10,20,50),
+                                     begins=c(-0.9,-0.7,-0.5,-0.3,-0.1,-0.01),
+                                     null_prob=c(0.1,0.5,1)
+                                     )
+{
+  #create an empty dataframe with 3 columns
+  results<-data.frame(matrix(ncol=9,nrow=length(num_tests)*length(null_prob)*length(begins)))
+  colnames(results)<-c('#test','null_prob','first correlation',
+                       'FWER_fwer_method','FDR_fwer_method',
+                       'FWER_fdr_method','FDR_fdr_method',
+                       'FWER_all','FDR_all')
+  max=length(num_tests)*length(null_prob)*length(begins)
+  # create a loop in both number of tests and null_prob
+
+  for (n in 1:length(num_tests)){
+    for(p in 1:length(null_prob)){
+      for(c in 1:length(begins)){
+        #calculate the index of result
+        index=(n-1)*length(null_prob)*length(begins)+(p-1)*length(begins)+c
+        #assign result
+        print(sprintf("progress: %d over %d",index,max ))
+        
+        result<-neg_simutation(number_of_test = num_tests[n],null_prob=null_prob[p],begin=begins[c])
+        results[index,'FWER_fwer_method']<-round(result$fwer_fwermethod,4)
+        results[index,'FDR_fwer_method']<-round(result$fdr_fwermethod,4)
+        results[index,'FWER_fdr_method']<-round(result$fwer_fdrmethod,4)
+        results[index,'FDR_fdr_method']<-round(result$fdr_fdrmethod,4)
+        results[index,'FWER_all']<-round(result$fwer_all,4)
+        results[index,'FDR_all']<-round(result$fdr_all,4)
+        results[index,'#test']<-num_tests[n]
+        results[index,'null_prob']<-null_prob[p]
+        results[index,'first correlation']<-begins[c]
+          
+        }
+        
+      }
+      
+    }
+  
+  return(results)
+}
+```
+
+**Saved result to folder**
+```{r}
+set.seed(123)
+dir="/Users/quangphucvu/Library/CloudStorage/OneDrive-nyu.edu/multiplicity/Results/"
+file="negative-orthant-matrix-23-11-20.csv"
+result<-print_result_random_no_sep()
+write.csv(result,file=paste0(dir,file))
+```
